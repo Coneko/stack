@@ -7,8 +7,6 @@ extern crate error_chain;
 extern crate futures;
 extern crate git2;
 extern crate hubcaps;
-#[macro_use]
-extern crate log;
 extern crate regex;
 extern crate tokio_core;
 
@@ -50,7 +48,7 @@ fn run_up() -> Result<i32> {
             "No USER environment variable found, cannot get current user's username."
         })?
     );
-    let pr_branch_postfix = "-pr";
+    let pr_head_branch_postfix = "-pr";
     let pr_base_branch_postfix = "-base";
 
     let repo: git2::Repository = git2::Repository::discover(".")
@@ -91,18 +89,38 @@ fn run_up() -> Result<i32> {
     if parents.next().is_some() {
         bail!("HEAD commit has more than one parent.");
     }
-    let base_branch: &str = &format!(
+    let mut push_callbacks = git2::RemoteCallbacks::default();
+    push_callbacks.credentials(
+        |_url, username_from_url, allowed_types| match username_from_url {
+            Some(username) => git2::Cred::ssh_key_from_agent(username),
+            None => git2::Cred::username("git"),
+        },
+    );
+    let mut push_options = git2::PushOptions::default();
+    push_options.packbuilder_parallelism(0);
+    push_options.remote_callbacks(push_callbacks);
+    let pr_base_branch_name: &str = &format!(
         "{}{}{}",
         pr_branch_prefix,
         head_commit.id(),
         pr_base_branch_postfix
     );
-    let pr_base_branch: git2::Branch = repo.branch(base_branch, &parent, false)
+    let pr_base_branch: git2::Branch = repo.branch(pr_base_branch_name, &parent, true)
         .chain_err(|| format!("Could not create branch at parent '{}'", parent.id()))?;
-
     origin
-        .push(&[base_branch], Default::default())
+        .push(&[pr_base_branch_name], Option::Some(&mut push_options))
         .chain_err(|| "Couldn't push PR base branch.")?;
+    let pr_head_branch_name: &str = &format!(
+        "{}{}{}",
+        pr_branch_prefix,
+        head_commit.id(),
+        pr_head_branch_postfix
+    );
+    let pr_head_branch: git2::Branch = repo.branch(pr_head_branch_name, &head_commit, false)
+        .chain_err(|| format!("Could not create branch at head '{}'", head_commit.id()))?;
+    origin
+        .push(&[pr_head_branch_name], Option::Some(&mut push_options))
+        .chain_err(|| "Couldn't push PR head branch.")?;
 
     Ok(0)
 }
