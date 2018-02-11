@@ -1,0 +1,11 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/git-commands/git-subrepo#readme
+;
+[subrepo]
+	remote = Coneko/git2-rs
+	branch = master
+	commit = 06891e00f0452374628e099d2465244a0a1aa3fb
+	parent = e6e5e7b943c6419ced151b7fca7b280c2a936373
+	cmdver = 0.3.1
