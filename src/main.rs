@@ -58,7 +58,8 @@ fn run_up() -> Result<i32> {
     let re: regex::Regex = regex::Regex::new(
         r"^git@github\.com:(?P<owner>[^/]+)/(?P<repo>.+)\.git$",
     ).chain_err(|| "Could not construct regex.")?;
-    let captures = re.captures(origin.url().ok_or("Could not read remote origin url.")?)
+    let origin_url = origin.url().ok_or("Could not read remote origin url.")?;
+    let captures = re.captures(origin_url)
         .ok_or("Could not extract Github repo from origin url.")?;
     let github_owner = captures
         .name("owner")
@@ -89,16 +90,8 @@ fn run_up() -> Result<i32> {
     if parents.next().is_some() {
         bail!("HEAD commit has more than one parent.");
     }
-    let mut push_callbacks = git2::RemoteCallbacks::default();
-    push_callbacks.credentials(
-        |_url, username_from_url, allowed_types| match username_from_url {
-            Some(username) => git2::Cred::ssh_key_from_agent(username),
-            None => git2::Cred::username("git"),
-        },
-    );
-    let mut push_options = git2::PushOptions::default();
-    push_options.packbuilder_parallelism(0);
-    push_options.remote_callbacks(push_callbacks);
+    let repo_config = repo.config().chain_err(|| "Could not read repo config.")?;
+    let mut push_options = push_options(origin_url, &repo_config);
     let pr_base_branch_name: &str = &format!(
         "{}{}{}",
         pr_branch_prefix,
@@ -121,6 +114,48 @@ fn run_up() -> Result<i32> {
     origin
         .push(&[pr_head_branch_name], Option::Some(&mut push_options))
         .chain_err(|| "Couldn't push PR head branch.")?;
-
     Ok(0)
+}
+
+fn push_options<'a>(url: &str, config: &'a git2::Config) -> git2::PushOptions<'a> {
+    let mut cred_helper = git2::CredentialHelper::new(url);
+    cred_helper.config(config);
+    let mut push_callbacks = git2::RemoteCallbacks::default();
+    let mut tried_agent = false;
+    push_callbacks.credentials(move |url, username_from_url, allowed_types| {
+        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+            let user = username_from_url
+                .map(|s| s.to_string())
+                .or_else(|| cred_helper.username.clone())
+                .unwrap_or("git".to_string());
+            if !tried_agent {
+                tried_agent = true;
+                git2::Cred::ssh_key_from_agent(&user)
+            } else {
+                match std::env::var("HOME") {
+                    Ok(home) => git2::Cred::ssh_key(
+                        &user,
+                        None,
+                        std::path::Path::new(&format!("{}/{}", home, ".ssh/id_rsa")),
+                        None,
+                    ),
+
+                    Err(e) => Err(git2::Error::from_str(&format!(
+                        "Could not get user home directory:\n{}",
+                        e,
+                    ))),
+                }
+            }
+        } else if allowed_types.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+            git2::Cred::credential_helper(config, url, username_from_url)
+        } else if allowed_types.contains(git2::CredentialType::DEFAULT) {
+            git2::Cred::default()
+        } else {
+            Err(git2::Error::from_str("no authentication available"))
+        }
+    });
+    let mut push_options = git2::PushOptions::default();
+    push_options.packbuilder_parallelism(0);
+    push_options.remote_callbacks(push_callbacks);
+    push_options
 }
