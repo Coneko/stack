@@ -101,7 +101,17 @@ fn run_up() -> Result<i32> {
     let pr_base_branch: git2::Branch = repo.branch(pr_base_branch_name, &parent, true)
         .chain_err(|| format!("Could not create branch at parent '{}'", parent.id()))?;
     origin
-        .push(&[pr_base_branch_name], Option::Some(&mut push_options))
+        .push(
+            &[
+                pr_base_branch.get().name().chain_err(|| {
+                    format!(
+                        "PR base branch '{}' has invalid reference name.",
+                        pr_base_branch_name
+                    )
+                })?,
+            ],
+            Option::Some(&mut push_options),
+        )
         .chain_err(|| "Couldn't push PR base branch.")?;
     let pr_head_branch_name: &str = &format!(
         "{}{}{}",
@@ -112,7 +122,17 @@ fn run_up() -> Result<i32> {
     let pr_head_branch: git2::Branch = repo.branch(pr_head_branch_name, &head_commit, false)
         .chain_err(|| format!("Could not create branch at head '{}'", head_commit.id()))?;
     origin
-        .push(&[pr_head_branch_name], Option::Some(&mut push_options))
+        .push(
+            &[
+                pr_head_branch.get().name().chain_err(|| {
+                    format!(
+                        "PR head branch '{}' has invalid reference name.",
+                        pr_head_branch_name
+                    )
+                })?,
+            ],
+            Option::Some(&mut push_options),
+        )
         .chain_err(|| "Couldn't push PR head branch.")?;
     Ok(0)
 }
