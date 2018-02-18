@@ -134,6 +134,18 @@ fn run_up() -> Result<i32> {
             Option::Some(&mut push_options),
         )
         .chain_err(|| "Couldn't push PR head branch.")?;
+    let pull_requests = github_repo.pulls();
+    let pull_options = hubcaps::pulls::PullOptions::new::<&str, &str, &str, &str>(
+        head_commit.message().ok_or(format!(
+            "Head commit '{}' has no message.",
+            head_commit.id()
+        ))?,
+        pr_head_branch_name,
+        pr_base_branch_name,
+        None,
+    );
+    core.run(pull_requests.create(&pull_options))
+        .chain_err(|| "Could not create pull request.")?;
     Ok(0)
 }
 
