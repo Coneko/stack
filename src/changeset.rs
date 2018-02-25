@@ -3,6 +3,7 @@ use regex;
 use std;
 use std::io::Read;
 use tempfile;
+use errors::*;
 
 pub struct Changeset {
     title: String,
@@ -13,26 +14,53 @@ pub struct Changeset {
 }
 
 impl Changeset {
-    pub fn new_from_editor() -> std::io::Result<Changeset> {
-        let mut tmpfile: tempfile::NamedTempFile = tempfile::NamedTempFile::new()?;
+    pub fn new_from_editor() -> Result<Changeset> {
+        let mut tmpfile: tempfile::NamedTempFile =
+            tempfile::NamedTempFile::new().chain_err(|| "Failed to create new temporary file.")?;
         let editor = std::env::var("VISUAL")
-            .or(std::env::var("EDITOR")
-                .or_else(|_| -> Result<String, std::env::VarError> { Ok("vi".to_string()) }))
+            .or(std::env::var("EDITOR").or_else(
+                |_| -> std::result::Result<String, std::env::VarError> { Ok("vi".to_string()) },
+            ))
             .unwrap();
-        let rc = std::process::Command::new(editor)
+        let rc = std::process::Command::new(&editor)
             .args(&[tmpfile.path()])
-            .status()?;
+            .status()
+            .chain_err(|| {
+                format!(
+                    "Could not open temporary file '{}' with editor '{}'.",
+                    tmpfile.path().to_string_lossy(),
+                    editor
+                )
+            })?;
         match rc.success() {
             true => {
                 let mut buf: String = String::new();
-                tmpfile.read_to_string(&mut buf)?;
+                tmpfile.read_to_string(&mut buf).chain_err(|| {
+                    format!(
+                        "Could not read contents of temporary file '{}' opened with editor '{}'.",
+                        tmpfile.path().to_string_lossy(),
+                        editor
+                    )
+                })?;
                 Self::new_from_string(buf)
             }
-            false => Err(std::io::Error::from(std::io::ErrorKind::Other)),
+            false => match rc.code() {
+                Some(code) => bail!(
+                    "Editor '{}' exited with code '{}' after opening temporary file '{}'.",
+                    editor,
+                    code,
+                    tmpfile.path().to_string_lossy()
+                ),
+                None => bail!(
+                    "Editor '{}' terminated by signal after opening temporary file '{}'.",
+                    editor,
+                    tmpfile.path().to_string_lossy()
+                ),
+            },
         }
     }
 
-    pub fn new_from_string(string: String) -> std::io::Result<Changeset> {
+    pub fn new_from_string(string: String) -> Result<Changeset> {
         let lines = string.lines();
         let mut title: Option<String> = None;
         let mut message: Vec<String> = Vec::new();
@@ -43,12 +71,14 @@ impl Changeset {
         for line in lines {
             match line {
                 x if x.starts_with("#") => continue,
-                x if x.starts_with("Pull request:") => if pr.is_none() {
-                    pr = Some(match x.parse::<u64>() {
+                x if x.starts_with("Pull request:") => {
+                    if pr.is_none() {
+                        pr = Some(match x.parse::<u64>() {
                         Ok(y) => y,
-                        Err(_) => return Err(std::io::Error::from(std::io::ErrorKind::Other)),
+                        Err(_) => bail!("Could not parse pull request number from 'Pull request' field: '{}'.", x),
                     })
-                },
+                    }
+                }
                 x if x.starts_with("Depends on:") => (),
                 _ => (),
             }
@@ -63,28 +93,32 @@ impl Changeset {
         })
     }
 
-    fn parse_pull_request(
-        string: &str,
-        github_owner: &str,
-        github_repo: &str,
-    ) -> std::io::Result<u64> {
+    fn parse_pull_request(string: &str, github_owner: &str, github_repo: &str) -> Result<u64> {
         let pattern = format!(
             r"^\s*(https://github.com/{}/{}/pull/|http://github.com/{0}/{1}/pull/|#)?(?P<pr_number>[0-9]+)\s*$",
             github_owner,
             github_repo,
         );
-        let re: regex::Regex = regex::Regex::new(&pattern)
-            .map_err(|_| std::io::Error::from(std::io::ErrorKind::Other))?;
-        let captures = re.captures(string)
-            .ok_or(std::io::Error::from(std::io::ErrorKind::Other))?;
-        Ok(captures
+        let re: regex::Regex =
+            regex::Regex::new(&pattern).chain_err(|| "Could not construct pull request regex.")?;
+        let captures = re.captures(string).ok_or(format!(
+            "Could not extract pull request number in 'Pull request' field: '{}'.",
+            string
+        ))?;
+        let pr_number = captures
             .name("pr_number")
-            .ok_or(std::io::Error::from(std::io::ErrorKind::Other))
-            .and_then(|x| {
-                x.as_str()
-                    .parse::<u64>()
-                    .map_err(|_| std::io::Error::from(std::io::ErrorKind::Other))
-            })?)
+            .ok_or(format!(
+                "Could not find pull request number in 'Pull request' field: '{}'.",
+                string
+            ))?
+            .as_str();
+        let pr_number = pr_number.parse::<u64>().chain_err(|| {
+            format!(
+                "Could not parse pull request number from 'Pull request' field: '{}'.",
+                pr_number
+            )
+        })?;
+        Ok(pr_number)
     }
 }
 

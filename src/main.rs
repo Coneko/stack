@@ -58,7 +58,7 @@ fn run_up() -> Result<i32> {
         .chain_err(|| "Could not find remote origin.")?;
     let re: regex::Regex = regex::Regex::new(
         r"^git@github\.com:(?P<owner>[^/]+)/(?P<repo>.+)\.git$",
-    ).chain_err(|| "Could not construct regex.")?;
+    ).chain_err(|| "Could not construct Github repo regex.")?;
     let origin_url = origin.url().ok_or("Could not read remote origin url.")?;
     let captures = re.captures(origin_url)
         .ok_or("Could not extract Github repo from origin url.")?;
