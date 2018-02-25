@@ -7,8 +7,13 @@ extern crate error_chain;
 extern crate futures;
 extern crate git2;
 extern crate hubcaps;
+#[macro_use]
+extern crate indoc;
 extern crate regex;
+extern crate tempfile;
 extern crate tokio_core;
+
+mod changeset;
 
 mod errors {
     error_chain!{}
@@ -134,6 +139,8 @@ fn run_up() -> Result<i32> {
             Option::Some(&mut push_options),
         )
         .chain_err(|| "Couldn't push PR head branch.")?;
+    let changeset = changeset::Changeset::new_from_editor()
+        .chain_err(|| "Could not get changeset information from editor.")?;
     let pull_requests = github_repo.pulls();
     let pull_options = hubcaps::pulls::PullOptions::new::<&str, &str, &str, &str>(
         head_commit.message().ok_or(format!(
@@ -144,7 +151,7 @@ fn run_up() -> Result<i32> {
         pr_base_branch_name,
         None,
     );
-    core.run(pull_requests.create(&pull_options))
+    let pr = core.run(pull_requests.create(&pull_options))
         .chain_err(|| "Could not create pull request.")?;
     Ok(0)
 }
