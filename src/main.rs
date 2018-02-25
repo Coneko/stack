@@ -10,16 +10,12 @@ extern crate hubcaps;
 #[macro_use]
 extern crate indoc;
 extern crate regex;
+extern crate stack;
 extern crate tempfile;
 extern crate tokio_core;
 
-mod changeset;
-
-mod errors {
-    error_chain!{}
-}
-
-use errors::*;
+use stack::changeset;
+use stack::errors::*;
 
 quick_main!(run);
 
