@@ -15,7 +15,7 @@ pub struct Changeset {
 
 impl Changeset {
     pub fn new_from_editor() -> Result<Changeset> {
-        let mut tmpfile: tempfile::NamedTempFile =
+        let mut tmpfile =
             tempfile::NamedTempFile::new().chain_err(|| "Failed to create new temporary file.")?;
         let editor = std::env::var("VISUAL")
             .or(std::env::var("EDITOR").or_else(
@@ -34,7 +34,7 @@ impl Changeset {
             })?;
         match rc.success() {
             true => {
-                let mut buf: String = String::new();
+                let mut buf = String::new();
                 tmpfile.read_to_string(&mut buf).chain_err(|| {
                     format!(
                         "Could not read contents of temporary file '{}' opened with editor '{}'.",
@@ -42,7 +42,7 @@ impl Changeset {
                         editor
                     )
                 })?;
-                Self::new_from_string(buf)
+                Self::new_from_string(&buf)
             }
             false => match rc.code() {
                 Some(code) => bail!(
@@ -60,13 +60,13 @@ impl Changeset {
         }
     }
 
-    pub fn new_from_string(string: String) -> Result<Changeset> {
+    pub fn new_from_string(string: &str) -> Result<Changeset> {
         let lines = string.lines();
-        let mut title: Option<String> = None;
-        let mut message: Vec<String> = Vec::new();
-        let mut pr: Option<u64> = None;
-        let mut dependencies: Vec<u64> = Vec::new();
-        let mut dependents: Vec<u64> = Vec::new();
+        let mut title = None;
+        let mut message = Vec::<&str>::new();
+        let mut pr = None;
+        let mut dependencies = Vec::new();
+        let mut dependents = Vec::new();
 
         for line in lines {
             match line {
@@ -74,9 +74,9 @@ impl Changeset {
                 x if x.starts_with("Pull request:") => {
                     if pr.is_none() {
                         pr = Some(match x.parse::<u64>() {
-                        Ok(y) => y,
-                        Err(_) => bail!("Could not parse pull request number from 'Pull request' field: '{}'.", x),
-                    })
+                            Ok(y) => y,
+                            Err(_) => bail!("Could not parse pull request number from 'Pull request' field: '{}'.", x),
+                        })
                     }
                 }
                 x if x.starts_with("Depends on:") => (),
@@ -84,12 +84,22 @@ impl Changeset {
             }
         }
 
+        let title = title.ok_or(format!(
+            "Could not parse title from changeset description:\n{}",
+            string
+        ))?;
+        let message = if message.len() == 0 {
+            None
+        } else {
+            Some(message.join("\n"))
+        };
+
         Ok(Changeset {
-            title: "".to_owned(),
-            message: None,
-            pr: None,
-            dependencies: Vec::new(),
-            dependents: Vec::new(),
+            title,
+            message,
+            pr,
+            dependencies,
+            dependents,
         })
     }
 
@@ -99,7 +109,7 @@ impl Changeset {
             github_owner,
             github_repo,
         );
-        let re: regex::Regex =
+        let re =
             regex::Regex::new(&pattern).chain_err(|| "Could not construct pull request regex.")?;
         let captures = re.captures(string).ok_or(format!(
             "Could not extract pull request number in 'Pull request' field: '{}'.",
@@ -128,7 +138,7 @@ mod tests {
 
     #[test]
     fn new_from_string_cannot_create_from_empty_string() {
-        let result = Changeset::new_from_string("".to_string());
+        let result = Changeset::new_from_string("");
         assert!(result.is_err());
     }
 
@@ -142,7 +152,7 @@ mod tests {
             Dependencies: https://github.com/Coneko/stack/pull/1
             "
         );
-        let result = Changeset::new_from_string(message.to_string());
+        let result = Changeset::new_from_string(message);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.title, "This is the title.");
@@ -158,7 +168,7 @@ mod tests {
             Pull request: https://github.com/Coneko/stack/pull/1
             "
         );
-        let result = Changeset::new_from_string(message.to_string());
+        let result = Changeset::new_from_string(message);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.title, "This is the title.");

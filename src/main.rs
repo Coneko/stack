@@ -7,11 +7,8 @@ extern crate error_chain;
 extern crate futures;
 extern crate git2;
 extern crate hubcaps;
-#[macro_use]
-extern crate indoc;
 extern crate regex;
 extern crate stack;
-extern crate tempfile;
 extern crate tokio_core;
 
 use stack::changeset;
@@ -22,7 +19,7 @@ quick_main!(run);
 fn run() -> Result<i32> {
     env_logger::init();
 
-    let prog: String = std::env::current_exe()
+    let prog = std::env::current_exe()
         .expect("Couldn't get program name.")
         .file_name()
         .expect("No file found.")
@@ -43,7 +40,7 @@ fn run() -> Result<i32> {
 }
 
 fn run_up() -> Result<i32> {
-    let pr_branch_prefix: String = format!(
+    let pr_branch_prefix = format!(
         "{}-stack-",
         std::env::var("USER").chain_err(|| {
             "No USER environment variable found, cannot get current user's username."
@@ -52,13 +49,12 @@ fn run_up() -> Result<i32> {
     let pr_head_branch_postfix = "-pr";
     let pr_base_branch_postfix = "-base";
 
-    let repo: git2::Repository = git2::Repository::discover(".")
+    let repo = git2::Repository::discover(".")
         .chain_err(|| "Not a git repository (or any of the parent directories).")?;
-    let mut origin: git2::Remote = repo.find_remote("origin")
+    let mut origin = repo.find_remote("origin")
         .chain_err(|| "Could not find remote origin.")?;
-    let re: regex::Regex = regex::Regex::new(
-        r"^git@github\.com:(?P<owner>[^/]+)/(?P<repo>.+)\.git$",
-    ).chain_err(|| "Could not construct Github repo regex.")?;
+    let re = regex::Regex::new(r"^git@github\.com:(?P<owner>[^/]+)/(?P<repo>.+)\.git$")
+        .chain_err(|| "Could not construct Github repo regex.")?;
     let origin_url = origin.url().ok_or("Could not read remote origin url.")?;
     let captures = re.captures(origin_url)
         .ok_or("Could not extract Github repo from origin url.")?;
@@ -70,11 +66,10 @@ fn run_up() -> Result<i32> {
         .name("repo")
         .ok_or("Could not find github repo in origin url.")?
         .as_str();
-    let token: String =
+    let token =
         std::env::var("GITHUB_TOKEN").chain_err(|| "No GITHUB_TOKEN environment variable found.")?;
 
-    let mut core: tokio_core::reactor::Core =
-        tokio_core::reactor::Core::new().chain_err(|| "Could not create new core.")?;
+    let mut core = tokio_core::reactor::Core::new().chain_err(|| "Could not create new core.")?;
     let github = hubcaps::Github::new(
         concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
         Some(hubcaps::Credentials::Token(token)),
@@ -82,7 +77,7 @@ fn run_up() -> Result<i32> {
     );
     let github_repo = github.repo(github_owner, github_repo);
 
-    let head_commit: git2::Commit = repo.head()
+    let head_commit = repo.head()
         .chain_err(|| "Could not get HEAD reference.")?
         .peel_to_commit()
         .chain_err(|| "Could not get commit referenced by HEAD.")?;
@@ -93,13 +88,13 @@ fn run_up() -> Result<i32> {
     }
     let repo_config = repo.config().chain_err(|| "Could not read repo config.")?;
     let mut push_options = push_options(origin_url, &repo_config);
-    let pr_base_branch_name: &str = &format!(
+    let pr_base_branch_name = format!(
         "{}{}{}",
         pr_branch_prefix,
         head_commit.id(),
         pr_base_branch_postfix
     );
-    let pr_base_branch: git2::Branch = repo.branch(pr_base_branch_name, &parent, true)
+    let pr_base_branch = repo.branch(&pr_base_branch_name, &parent, true)
         .chain_err(|| format!("Could not create branch at parent '{}'", parent.id()))?;
     origin
         .push(
@@ -114,13 +109,13 @@ fn run_up() -> Result<i32> {
             Option::Some(&mut push_options),
         )
         .chain_err(|| "Couldn't push PR base branch.")?;
-    let pr_head_branch_name: &str = &format!(
+    let pr_head_branch_name = format!(
         "{}{}{}",
         pr_branch_prefix,
         head_commit.id(),
         pr_head_branch_postfix
     );
-    let pr_head_branch: git2::Branch = repo.branch(pr_head_branch_name, &head_commit, false)
+    let pr_head_branch = repo.branch(&pr_head_branch_name, &head_commit, false)
         .chain_err(|| format!("Could not create branch at head '{}'", head_commit.id()))?;
     origin
         .push(
@@ -143,8 +138,8 @@ fn run_up() -> Result<i32> {
             "Head commit '{}' has no message.",
             head_commit.id()
         ))?,
-        pr_head_branch_name,
-        pr_base_branch_name,
+        &pr_head_branch_name,
+        &pr_base_branch_name,
         None,
     );
     let pr = core.run(pull_requests.create(&pull_options))
