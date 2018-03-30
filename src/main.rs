@@ -1,7 +1,6 @@
 #![feature(nll)]
 #![recursion_limit = "1024"]
 extern crate clap;
-extern crate env_logger;
 #[macro_use]
 extern crate error_chain;
 extern crate futures;
@@ -17,8 +16,6 @@ use stack::errors::*;
 quick_main!(run);
 
 fn run() -> Result<i32> {
-    env_logger::init();
-
     let prog = std::env::current_exe()
         .expect("Couldn't get program name.")
         .file_name()
