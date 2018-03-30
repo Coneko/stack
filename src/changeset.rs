@@ -1,4 +1,3 @@
-use indoc;
 use regex;
 use std;
 use std::io::Read;
@@ -6,15 +5,14 @@ use tempfile;
 use errors::*;
 
 pub struct Changeset {
-    title: String,
-    message: Option<String>,
-    pr: Option<u64>,
-    dependencies: Vec<u64>,
-    dependents: Vec<u64>,
+    pub title: String,
+    pub message: Option<String>,
+    pub pr: Option<u64>,
+    pub dependencies: Vec<u64>,
 }
 
 impl Changeset {
-    pub fn new_from_editor() -> Result<Changeset> {
+    pub fn new_from_editor(github_owner: &str, github_repo: &str) -> Result<Changeset> {
         let mut tmpfile =
             tempfile::NamedTempFile::new().chain_err(|| "Failed to create new temporary file.")?;
         let editor = std::env::var("VISUAL")
@@ -42,7 +40,7 @@ impl Changeset {
                         editor
                     )
                 })?;
-                Self::new_from_string(&buf)
+                Self::new_from_string(&buf, github_owner, github_repo)
             }
             false => match rc.code() {
                 Some(code) => bail!(
@@ -60,27 +58,29 @@ impl Changeset {
         }
     }
 
-    pub fn new_from_string(string: &str) -> Result<Changeset> {
+    pub fn new_from_string(string: &str, github_owner: &str, github_repo: &str) -> Result<Changeset> {
         let lines = string.lines();
         let mut title = None;
         let mut message = Vec::<&str>::new();
         let mut pr = None;
         let mut dependencies = Vec::new();
-        let mut dependents = Vec::new();
+
+        let pull_request_field_marker = "Pull request:";
 
         for line in lines {
             match line {
                 x if x.starts_with("#") => continue,
-                x if x.starts_with("Pull request:") => {
-                    if pr.is_none() {
-                        pr = Some(match x.parse::<u64>() {
+                x if x.starts_with(pull_request_field_marker) => {
+                    match pr {
+                        Some(_) => bail!("Multiple 'Pull request' fields found in changeset description:\n{}", string),
+                        None => pr = Some(match Self::parse_pull_request(&x[pull_request_field_marker.len()..], github_owner, github_repo) {
                             Ok(y) => y,
                             Err(_) => bail!("Could not parse pull request number from 'Pull request' field: '{}'.", x),
-                        })
-                    }
+                        }),
+                    };
                 }
                 x if x.starts_with("Depends on:") => (),
-                _ => (),
+                x => message.push(x),
             }
         }
 
@@ -99,7 +99,6 @@ impl Changeset {
             message,
             pr,
             dependencies,
-            dependents,
         })
     }
 
@@ -138,7 +137,7 @@ mod tests {
 
     #[test]
     fn new_from_string_cannot_create_from_empty_string() {
-        let result = Changeset::new_from_string("");
+        let result = Changeset::new_from_string("", "Coneko", "stack");
         assert!(result.is_err());
     }
 
@@ -152,7 +151,7 @@ mod tests {
             Dependencies: https://github.com/Coneko/stack/pull/1
             "
         );
-        let result = Changeset::new_from_string(message);
+        let result = Changeset::new_from_string(message, "Coneko", "stack");
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.title, "This is the title.");
@@ -168,13 +167,30 @@ mod tests {
             Pull request: https://github.com/Coneko/stack/pull/1
             "
         );
-        let result = Changeset::new_from_string(message);
+        let result = Changeset::new_from_string(message, "Coneko", "stack");
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.title, "This is the title.");
         assert!(result.pr.is_some());
         let pr = result.pr.unwrap();
         assert_eq!(pr, 1);
+    }
+
+    #[test]
+    fn new_from_string_cannot_create_from_string_with_multiple_pr_fields() {
+        let message = indoc!(
+            "
+            This is the title.
+
+            Pull request: https://github.com/Coneko/stack/pull/1
+            This is the longer description of the commit.
+            Pull request: https://github.com/Coneko/stack/pull/1
+            "
+        );
+        let result = Changeset::new_from_string(message, "Coneko", "stack");
+        assert!(result.is_err());
+        let result = result.err().unwrap();
+        assert!(result.description().contains("Multiple"));
     }
 
     #[test]

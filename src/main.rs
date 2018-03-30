@@ -62,7 +62,7 @@ fn run_up() -> Result<i32> {
         .name("owner")
         .ok_or("Could not find github owner in origin url.")?
         .as_str();
-    let github_repo = captures
+    let github_repo_name = captures
         .name("repo")
         .ok_or("Could not find github repo in origin url.")?
         .as_str();
@@ -75,8 +75,10 @@ fn run_up() -> Result<i32> {
         Some(hubcaps::Credentials::Token(token)),
         &core.handle(),
     );
-    let github_repo = github.repo(github_owner, github_repo);
+    let changeset = changeset::Changeset::new_from_editor(github_owner, github_repo_name)
+        .chain_err(|| "Could not get changeset information from editor.")?;
 
+    let github_repo = github.repo(github_owner, github_repo_name);
     let head_commit = repo.head()
         .chain_err(|| "Could not get HEAD reference.")?
         .peel_to_commit()
@@ -130,8 +132,6 @@ fn run_up() -> Result<i32> {
             Option::Some(&mut push_options),
         )
         .chain_err(|| "Couldn't push PR head branch.")?;
-    let changeset = changeset::Changeset::new_from_editor()
-        .chain_err(|| "Could not get changeset information from editor.")?;
     let pull_requests = github_repo.pulls();
     let pull_options = hubcaps::pulls::PullOptions::new::<&str, &str, &str, &str>(
         head_commit.message().ok_or(format!(
