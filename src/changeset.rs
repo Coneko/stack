@@ -71,9 +71,11 @@ impl Changeset {
         let mut dependencies = Vec::new();
 
         let pull_request_field_marker = "Pull request:";
+        let dependency_field_marker = "Depends on:";
 
         for line in lines {
             match line {
+                x if x.is_empty() => continue,
                 x if x.starts_with('#') => continue,
                 x if x.starts_with(pull_request_field_marker) => {
                     match pr {
@@ -94,17 +96,22 @@ impl Changeset {
                         }
                     };
                 }
-                x if x.starts_with("Depends on:") => (),
-                x => message.push(x),
+                x if x.starts_with(dependency_field_marker) => (),
+                x => match title {
+                    Some(_) => message.push(x),
+                    None => title = Some(x),
+                },
             }
         }
 
-        let title = title.ok_or_else(|| {
-            format!(
-                "Could not parse title from changeset description:\n{}",
-                string
-            )
-        })?;
+        let title = title
+            .ok_or_else(|| {
+                format!(
+                    "Could not parse title from changeset description:\n{}",
+                    string
+                )
+            })?
+            .to_string();
         let message = if message.is_empty() {
             None
         } else {
@@ -156,6 +163,24 @@ impl Changeset {
 mod tests {
     use super::*;
 
+    const MESSAGE_FIXTURE: &str = indoc!(
+        "
+
+        # First comment
+        This is the title.
+        # Another comment
+
+        This is the first line of the description.
+        # This is a comment in the middle of the description
+        This is the second line of the description.
+
+        Depends on: https://github.com/Coneko/stack/pull/1, https://github.com/Coneko/stack/pull/2
+        Depends on: https://github.com/Coneko/stack/pull/3
+
+        Pull request: https://github.com/Coneko/stack/pull/4
+        "
+    );
+
     #[test]
     fn new_from_string_cannot_create_from_empty_string() {
         let result = Changeset::new_from_string("", "Coneko", "stack");
@@ -163,13 +188,25 @@ mod tests {
     }
 
     #[test]
-    fn new_from_string_can_create_from_string_without_pr_field() {
+    fn new_from_string_cannot_create_from_string_without_title() {
+        let message = indoc!(
+            "
+
+            # comment
+
+            Pull request: https://github.com/Coneko/stack/pull/1
+            Depends on: https://github.com/Coneko/stack/pull/1
+            "
+        );
+        let result = Changeset::new_from_string(message, "Coneko", "stack");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn new_from_string_can_create_from_string_with_only_title() {
         let message = indoc!(
             "
             This is the title.
-
-            This is the longer description of the commit.
-            Dependencies: https://github.com/Coneko/stack/pull/1
             "
         );
         let result = Changeset::new_from_string(message, "Coneko", "stack");
@@ -179,22 +216,42 @@ mod tests {
     }
 
     #[test]
-    fn new_from_string_can_create_from_string_with_pr_field() {
-        let message = indoc!(
-            "
-            This is the title.
-
-            This is the longer description of the commit.
-            Pull request: https://github.com/Coneko/stack/pull/1
-            "
-        );
-        let result = Changeset::new_from_string(message, "Coneko", "stack");
+    fn new_from_string_can_read_title() {
+        let result = Changeset::new_from_string(MESSAGE_FIXTURE, "Coneko", "stack");
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.title, "This is the title.");
+        assert_eq!(result.title, "This is the title.")
+    }
+
+    #[test]
+    fn new_from_string_can_read_message() {
+        let result = Changeset::new_from_string(MESSAGE_FIXTURE, "Coneko", "stack");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(result.message.is_some());
+        let message = result.message.unwrap();
+        assert_eq!(
+            message,
+            "This is the first line of the description.\nThis is the second line of the description.",
+        );
+    }
+
+    #[test]
+    fn new_from_string_can_read_pr() {
+        let result = Changeset::new_from_string(MESSAGE_FIXTURE, "Coneko", "stack");
+        assert!(result.is_ok());
+        let result = result.unwrap();
         assert!(result.pr.is_some());
         let pr = result.pr.unwrap();
-        assert_eq!(pr, 1);
+        assert_eq!(pr, 4);
+    }
+
+    #[test]
+    fn new_from_string_can_read_dependencies() {
+        let result = Changeset::new_from_string(MESSAGE_FIXTURE, "Coneko", "stack");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.dependencies, vec![1, 2, 3]);
     }
 
     #[test]
