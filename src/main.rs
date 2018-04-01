@@ -134,10 +134,9 @@ fn run_up() -> Result<i32> {
         .chain_err(|| "Couldn't push PR head branch.")?;
     let pull_requests = github_repo.pulls();
     let pull_options = hubcaps::pulls::PullOptions::new::<&str, &str, &str, &str>(
-        head_commit.message().ok_or(format!(
-            "Head commit '{}' has no message.",
-            head_commit.id()
-        ))?,
+        head_commit
+            .message()
+            .ok_or_else(|| format!("Head commit '{}' has no message.", head_commit.id()))?,
         &pr_head_branch_name,
         &pr_base_branch_name,
         None,
@@ -157,7 +156,7 @@ fn push_options<'a>(url: &str, config: &'a git2::Config) -> git2::PushOptions<'a
             let user = username_from_url
                 .map(|s| s.to_string())
                 .or_else(|| cred_helper.username.clone())
-                .unwrap_or("git".to_string());
+                .unwrap_or_else(|| "git".to_string());
             if !tried_agent {
                 tried_agent = true;
                 git2::Cred::ssh_key_from_agent(&user)
