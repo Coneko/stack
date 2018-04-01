@@ -14,7 +14,7 @@ path = "src/main.rs"
 clap = "2.29.2"
 error-chain = "0.11.0"
 futures = "0.1.18"
-git2 = { path = "vendor/git2" }
+git2 = "0.7.1"
 hubcaps = "0.4.3"
 indoc = "0.2.3"
 log = "0.4.0"
