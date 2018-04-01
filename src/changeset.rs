@@ -7,11 +7,16 @@ use tempfile;
 pub struct Changeset {
     pub title: String,
     pub message: Option<String>,
+    pub branch: Option<String>,
     pub pr: Option<u64>,
     pub dependencies: Vec<u64>,
 }
 
 impl Changeset {
+    const BRANCH_FIELD_LABEL: &'static str = "Branch name:";
+    const PR_FIELD_LABEL: &'static str = "Pull request:";
+    const DEPENDENCIES_FIELD_LABEL: &'static str = "Depends on:";
+
     pub fn new_from_editor(github_owner: &str, github_repo: &str) -> Result<Changeset> {
         let mut tmpfile =
             tempfile::NamedTempFile::new().chain_err(|| "Failed to create new temporary file.")?;
@@ -67,32 +72,37 @@ impl Changeset {
         let lines = string.lines();
         let mut title = None;
         let mut message = Vec::<&str>::new();
+        let mut branch = None;
         let mut pr = None;
         let mut dependencies = Vec::new();
-
-        let pull_request_field_marker = "Pull request:";
-        let dependency_field_marker = "Depends on:";
 
         for line in lines {
             match line {
                 x if x.is_empty() => continue,
                 x if x.starts_with('#') => continue,
-                x if x.starts_with(pull_request_field_marker) => match pr {
+                x if x.starts_with(Self::BRANCH_FIELD_LABEL) => match branch {
+                    Some(_) => bail!(
+                        "Multiple 'Branch name' fields found in changeset description:\n{}",
+                        string,
+                    ),
+                    None => branch = Some(x[Self::BRANCH_FIELD_LABEL.len()..].trim().to_string()),
+                },
+                x if x.starts_with(Self::PR_FIELD_LABEL) => match pr {
                     Some(_) => bail!(
                         "Multiple 'Pull request' fields found in changeset description:\n{}",
                         string,
                     ),
                     None => match Self::parse_pull_request(
-                        &x[pull_request_field_marker.len()..],
+                        &x[Self::PR_FIELD_LABEL.len()..],
                         github_owner,
                         github_repo,
                     ) {
                         Ok(prs) => {
                             if prs.len() != 1 {
                                 bail!(
-                                            "'Pull request' field must specify exactly one pull request:\n{}",
-                                            string,
-                                        )
+                                    "'Pull request' field must specify exactly one pull request:\n{}",
+                                    string
+                                )
                             }
                             pr = Some(prs[0])
                         }
@@ -102,7 +112,19 @@ impl Changeset {
                         ),
                     },
                 },
-                x if x.starts_with(dependency_field_marker) => (),
+                x if x.starts_with(Self::DEPENDENCIES_FIELD_LABEL) => {
+                    match Self::parse_pull_request(
+                        &x[Self::DEPENDENCIES_FIELD_LABEL.len()..],
+                        github_owner,
+                        github_repo,
+                    ) {
+                        Ok(mut prs) => dependencies.append(&mut prs),
+                        Err(_) => bail!(
+                            "Could not parse pull request number from 'Pull request' field: '{}'.",
+                            x
+                        ),
+                    }
+                }
                 x => match title {
                     Some(_) => message.push(x),
                     None => title = Some(x),
@@ -127,6 +149,7 @@ impl Changeset {
         Ok(Changeset {
             title,
             message,
+            branch,
             pr,
             dependencies,
         })
@@ -183,6 +206,8 @@ mod tests {
         This is the first line of the description.
         # This is a comment in the middle of the description
         This is the second line of the description.
+
+        Branch name: hello
 
         Depends on: https://github.com/Coneko/stack/pull/1, https://github.com/Coneko/stack/pull/2
         Depends on: https://github.com/Coneko/stack/pull/3
@@ -244,6 +269,16 @@ mod tests {
             message,
             "This is the first line of the description.\nThis is the second line of the description.",
         );
+    }
+
+    #[test]
+    fn new_from_string_can_read_branch() {
+        let result = Changeset::new_from_string(MESSAGE_FIXTURE, "Coneko", "stack");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(result.branch.is_some());
+        let branch = result.branch.unwrap();
+        assert_eq!(branch, "hello".to_string());
     }
 
     #[test]
