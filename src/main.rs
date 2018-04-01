@@ -16,7 +16,7 @@ use stack::errors::*;
 quick_main!(run);
 
 fn run() -> Result<i32> {
-    let matches = parse_args();
+    let matches = new_app().get_matches();
     match matches.subcommand_name() {
         Some("up") => run_up(),
         None => bail!("No subcommand specified."),
@@ -24,19 +24,23 @@ fn run() -> Result<i32> {
     }
 }
 
-fn parse_args() -> clap::ArgMatches<'static> {
+fn new_app() -> clap::App<'static, 'static> {
     let prog = std::env::current_exe()
         .expect("Couldn't get program name.")
         .file_name()
         .expect("No file found.")
         .to_str()
         .expect("Not valid utf-8.")
-        .to_owned();
+        .to_string();
     clap::App::new(prog)
         .about("Create stacked pull requests.")
         .version(env!("CARGO_PKG_VERSION"))
+        .settings(&[
+            clap::AppSettings::AllowExternalSubcommands,
+            clap::AppSettings::SubcommandRequiredElseHelp,
+            clap::AppSettings::VersionlessSubcommands,
+        ])
         .subcommand(clap::SubCommand::with_name("up").about("Uploads a commit in the stack."))
-        .get_matches()
 }
 
 fn run_up() -> Result<i32> {
