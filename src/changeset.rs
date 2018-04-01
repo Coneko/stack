@@ -1,8 +1,8 @@
+use errors::*;
 use regex;
 use std;
 use std::io::Read;
 use tempfile;
-use errors::*;
 
 pub struct Changeset {
     pub title: String,
@@ -16,9 +16,11 @@ impl Changeset {
         let mut tmpfile =
             tempfile::NamedTempFile::new().chain_err(|| "Failed to create new temporary file.")?;
         let editor = std::env::var("VISUAL")
-            .or(std::env::var("EDITOR").or_else(
-                |_| -> std::result::Result<String, std::env::VarError> { Ok("vi".to_string()) },
-            ))
+            .or_else(|_| {
+                std::env::var("EDITOR").or_else(
+                    |_| -> std::result::Result<String, std::env::VarError> { Ok("vi".to_string()) },
+                )
+            })
             .unwrap();
         let rc = std::process::Command::new(&editor)
             .args(&[tmpfile.path()])
@@ -30,19 +32,18 @@ impl Changeset {
                     editor
                 )
             })?;
-        match rc.success() {
-            true => {
-                let mut buf = String::new();
-                tmpfile.read_to_string(&mut buf).chain_err(|| {
-                    format!(
-                        "Could not read contents of temporary file '{}' opened with editor '{}'.",
-                        tmpfile.path().to_string_lossy(),
-                        editor
-                    )
-                })?;
-                Self::new_from_string(&buf, github_owner, github_repo)
-            }
-            false => match rc.code() {
+        if rc.success() {
+            let mut buf = String::new();
+            tmpfile.read_to_string(&mut buf).chain_err(|| {
+                format!(
+                    "Could not read contents of temporary file '{}' opened with editor '{}'.",
+                    tmpfile.path().to_string_lossy(),
+                    editor
+                )
+            })?;
+            Self::new_from_string(&buf, github_owner, github_repo)
+        } else {
+            match rc.code() {
                 Some(code) => bail!(
                     "Editor '{}' exited with code '{}' after opening temporary file '{}'.",
                     editor,
@@ -54,11 +55,15 @@ impl Changeset {
                     editor,
                     tmpfile.path().to_string_lossy()
                 ),
-            },
+            }
         }
     }
 
-    pub fn new_from_string(string: &str, github_owner: &str, github_repo: &str) -> Result<Changeset> {
+    pub fn new_from_string(
+        string: &str,
+        github_owner: &str,
+        github_repo: &str,
+    ) -> Result<Changeset> {
         let lines = string.lines();
         let mut title = None;
         let mut message = Vec::<&str>::new();
@@ -69,14 +74,24 @@ impl Changeset {
 
         for line in lines {
             match line {
-                x if x.starts_with("#") => continue,
+                x if x.starts_with('#') => continue,
                 x if x.starts_with(pull_request_field_marker) => {
                     match pr {
-                        Some(_) => bail!("Multiple 'Pull request' fields found in changeset description:\n{}", string),
-                        None => pr = Some(match Self::parse_pull_request(&x[pull_request_field_marker.len()..], github_owner, github_repo) {
-                            Ok(y) => y,
-                            Err(_) => bail!("Could not parse pull request number from 'Pull request' field: '{}'.", x),
-                        }),
+                        Some(_) => bail!(
+                            "Multiple 'Pull request' fields found in changeset description:\n{}",
+                            string
+                        ),
+                        None => {
+                            let result = Self::parse_pull_request(
+                                &x[pull_request_field_marker.len()..],
+                                github_owner,
+                                github_repo,
+                            );
+                            pr = Some(match result {
+                                Ok(y) => y,
+                                Err(_) => bail!("Could not parse pull request number from 'Pull request' field: '{}'.", x),
+                            })
+                        }
                     };
                 }
                 x if x.starts_with("Depends on:") => (),
@@ -84,11 +99,13 @@ impl Changeset {
             }
         }
 
-        let title = title.ok_or(format!(
-            "Could not parse title from changeset description:\n{}",
-            string
-        ))?;
-        let message = if message.len() == 0 {
+        let title = title.ok_or_else(|| {
+            format!(
+                "Could not parse title from changeset description:\n{}",
+                string
+            )
+        })?;
+        let message = if message.is_empty() {
             None
         } else {
             Some(message.join("\n"))
@@ -110,16 +127,20 @@ impl Changeset {
         );
         let re =
             regex::Regex::new(&pattern).chain_err(|| "Could not construct pull request regex.")?;
-        let captures = re.captures(string).ok_or(format!(
-            "Could not extract pull request number in 'Pull request' field: '{}'.",
-            string
-        ))?;
+        let captures = re.captures(string).ok_or_else(|| {
+            format!(
+                "Could not extract pull request number in 'Pull request' field: '{}'.",
+                string
+            )
+        })?;
         let pr_number = captures
             .name("pr_number")
-            .ok_or(format!(
-                "Could not find pull request number in 'Pull request' field: '{}'.",
-                string
-            ))?
+            .ok_or_else(|| {
+                format!(
+                    "Could not find pull request number in 'Pull request' field: '{}'.",
+                    string
+                )
+            })?
             .as_str();
         let pr_number = pr_number.parse::<u64>().chain_err(|| {
             format!(
