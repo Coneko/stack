@@ -8,7 +8,7 @@ pub struct Changeset {
     pub title: String,
     pub message: Option<String>,
     pub branch: Option<String>,
-    pub pr: Option<u64>,
+    pub pr: Option<String>,
 }
 
 impl Changeset {
@@ -94,7 +94,7 @@ impl Changeset {
                         github_owner,
                         github_repo,
                     ) {
-                        Ok(number) => pr = Some(number),
+                        Ok(pr_url) => pr = Some(pr_url),
                         Err(_) => bail!(
                             "Could not parse pull request number from 'Pull request' field: '{}'.",
                             x
@@ -130,7 +130,7 @@ impl Changeset {
         })
     }
 
-    fn parse_pull_request(string: &str, github_owner: &str, github_repo: &str) -> Result<u64> {
+    fn parse_pull_request(string: &str, github_owner: &str, github_repo: &str) -> Result<String> {
         let pattern = format!(
             r"^\s*(https://github.com/{}/{}/pull/|http://github.com/{0}/{1}/pull/|#)?(?P<pr_number>[0-9]+)\s*$",
             github_owner,
@@ -159,7 +159,10 @@ impl Changeset {
                 pr_number
             )
         })?;
-        Ok(pr_number)
+        Ok(format!(
+            "https://github.com/{}/{}/pull/{}",
+            github_owner, github_repo, pr_number,
+        ))
     }
 }
 
@@ -255,7 +258,7 @@ mod tests {
         let result = result.unwrap();
         assert!(result.pr.is_some());
         let pr = result.pr.unwrap();
-        assert_eq!(pr, 4);
+        assert_eq!(pr, "https://github.com/Coneko/stack/pull/4");
     }
 
     #[test]
@@ -306,14 +309,14 @@ mod tests {
     fn parse_pull_request_can_parse_number() {
         let result = Changeset::parse_pull_request("1", "Coneko", "stack");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
+        assert_eq!(result.unwrap(), "https://github.com/Coneko/stack/pull/1");
     }
 
     #[test]
     fn parse_pull_request_can_parse_pr_reference() {
         let result = Changeset::parse_pull_request("#1", "Coneko", "stack");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
+        assert_eq!(result.unwrap(), "https://github.com/Coneko/stack/pull/1");
     }
 
     #[test]
@@ -324,7 +327,7 @@ mod tests {
             "stack",
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
+        assert_eq!(result.unwrap(), "https://github.com/Coneko/stack/pull/1");
     }
 
     #[test]
@@ -335,6 +338,6 @@ mod tests {
             "stack",
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1);
+        assert_eq!(result.unwrap(), "https://github.com/Coneko/stack/pull/1");
     }
 }
