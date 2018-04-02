@@ -19,7 +19,6 @@ fn run() -> Result<i32> {
     let matches = new_app().get_matches();
     match matches.subcommand_name() {
         Some("up") => run_up(),
-        None => bail!("No subcommand specified."),
         _ => unreachable!(),
     }
 }
