@@ -9,13 +9,11 @@ pub struct Changeset {
     pub message: Option<String>,
     pub branch: Option<String>,
     pub pr: Option<u64>,
-    pub dependencies: Vec<u64>,
 }
 
 impl Changeset {
     const BRANCH_FIELD_LABEL: &'static str = "Branch name:";
     const PR_FIELD_LABEL: &'static str = "Pull request:";
-    const DEPENDENCIES_FIELD_LABEL: &'static str = "Depends on:";
 
     pub fn new_from_editor(github_owner: &str, github_repo: &str) -> Result<Changeset> {
         let mut tmpfile =
@@ -74,7 +72,6 @@ impl Changeset {
         let mut message = Vec::<&str>::new();
         let mut branch = None;
         let mut pr = None;
-        let mut dependencies = Vec::new();
 
         for line in lines {
             match line {
@@ -97,34 +94,13 @@ impl Changeset {
                         github_owner,
                         github_repo,
                     ) {
-                        Ok(prs) => {
-                            if prs.len() != 1 {
-                                bail!(
-                                    "'Pull request' field must specify exactly one pull request:\n{}",
-                                    string
-                                )
-                            }
-                            pr = Some(prs[0])
-                        }
+                        Ok(number) => pr = Some(number),
                         Err(_) => bail!(
                             "Could not parse pull request number from 'Pull request' field: '{}'.",
                             x
                         ),
                     },
                 },
-                x if x.starts_with(Self::DEPENDENCIES_FIELD_LABEL) => {
-                    match Self::parse_pull_request(
-                        &x[Self::DEPENDENCIES_FIELD_LABEL.len()..],
-                        github_owner,
-                        github_repo,
-                    ) {
-                        Ok(mut prs) => dependencies.append(&mut prs),
-                        Err(_) => bail!(
-                            "Could not parse pull request number from 'Pull request' field: '{}'.",
-                            x
-                        ),
-                    }
-                }
                 x => match title {
                     Some(_) => message.push(x),
                     None => title = Some(x),
@@ -151,11 +127,10 @@ impl Changeset {
             message,
             branch,
             pr,
-            dependencies,
         })
     }
 
-    fn parse_pull_request(string: &str, github_owner: &str, github_repo: &str) -> Result<Vec<u64>> {
+    fn parse_pull_request(string: &str, github_owner: &str, github_repo: &str) -> Result<u64> {
         let pattern = format!(
             r"^\s*(https://github.com/{}/{}/pull/|http://github.com/{0}/{1}/pull/|#)?(?P<pr_number>[0-9]+)\s*$",
             github_owner,
@@ -163,32 +138,28 @@ impl Changeset {
         );
         let re =
             regex::Regex::new(&pattern).chain_err(|| "Could not construct pull request regex.")?;
-        let mut result = Vec::new();
-        for pr in string.split(',') {
-            let captures = re.captures(pr).ok_or_else(|| {
+        let captures = re.captures(string).ok_or_else(|| {
+            format!(
+                "Could not extract pull request number in 'Pull request' field: '{}'.",
+                string
+            )
+        })?;
+        let pr_number = captures
+            .name("pr_number")
+            .ok_or_else(|| {
                 format!(
-                    "Could not extract pull request number in 'Pull request' field: '{}'.",
+                    "Could not find pull request number in 'Pull request' field: '{}'.",
                     string
                 )
-            })?;
-            let pr_number = captures
-                .name("pr_number")
-                .ok_or_else(|| {
-                    format!(
-                        "Could not find pull request number in 'Pull request' field: '{}'.",
-                        string
-                    )
-                })?
-                .as_str();
-            let pr_number = pr_number.parse::<u64>().chain_err(|| {
-                format!(
-                    "Could not parse pull request number from 'Pull request' field: '{}'.",
-                    pr_number
-                )
-            })?;
-            result.push(pr_number);
-        }
-        Ok(result)
+            })?
+            .as_str();
+        let pr_number = pr_number.parse::<u64>().chain_err(|| {
+            format!(
+                "Could not parse pull request number from 'Pull request' field: '{}'.",
+                pr_number
+            )
+        })?;
+        Ok(pr_number)
     }
 }
 
@@ -209,9 +180,6 @@ mod tests {
 
         Branch name: hello
 
-        Depends on: https://github.com/Coneko/stack/pull/1, https://github.com/Coneko/stack/pull/2
-        Depends on: https://github.com/Coneko/stack/pull/3
-
         Pull request: https://github.com/Coneko/stack/pull/4
         "
     );
@@ -228,9 +196,8 @@ mod tests {
             "
 
             # comment
-
+            Branch name: hello
             Pull request: https://github.com/Coneko/stack/pull/1
-            Depends on: https://github.com/Coneko/stack/pull/1
             "
         );
         let result = Changeset::new_from_string(message, "Coneko", "stack");
@@ -292,14 +259,6 @@ mod tests {
     }
 
     #[test]
-    fn new_from_string_can_read_dependencies() {
-        let result = Changeset::new_from_string(MESSAGE_FIXTURE, "Coneko", "stack");
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        assert_eq!(result.dependencies, vec![1, 2, 3]);
-    }
-
-    #[test]
     fn new_from_string_cannot_create_from_string_with_multiple_pr_fields() {
         let message = indoc!(
             "
@@ -314,21 +273,6 @@ mod tests {
         assert!(result.is_err());
         let result = result.err().unwrap();
         assert!(result.description().contains("Multiple"));
-    }
-
-    #[test]
-    fn new_from_string_cannot_create_from_string_with_multiple_prs_field() {
-        let message = indoc!(
-            "
-            This is the title.
-
-            Pull request: 1, 2
-            "
-        );
-        let result = Changeset::new_from_string(message, "Coneko", "stack");
-        assert!(result.is_err());
-        let result = result.err().unwrap();
-        assert!(result.description().contains("exactly"));
     }
 
     #[test]
@@ -362,14 +306,14 @@ mod tests {
     fn parse_pull_request_can_parse_number() {
         let result = Changeset::parse_pull_request("1", "Coneko", "stack");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), vec![1]);
+        assert_eq!(result.unwrap(), 1);
     }
 
     #[test]
-    fn parse_pull_request_can_pr_reference() {
+    fn parse_pull_request_can_parse_pr_reference() {
         let result = Changeset::parse_pull_request("#1", "Coneko", "stack");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), vec![1]);
+        assert_eq!(result.unwrap(), 1);
     }
 
     #[test]
@@ -380,7 +324,7 @@ mod tests {
             "stack",
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), vec![1]);
+        assert_eq!(result.unwrap(), 1);
     }
 
     #[test]
@@ -391,6 +335,6 @@ mod tests {
             "stack",
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), vec![1]);
+        assert_eq!(result.unwrap(), 1);
     }
 }
